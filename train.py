@@ -17,11 +17,17 @@ from transformers import (
 )
 from data import prepare_dataset
 from constants import TRAINING_CONFIG_PATH
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+
+import torch
+print(torch.cuda.device_count())  # should be 1
+print(torch.cuda.current_device())
 
 def main(args):
-    max_seq_length = 1024
+    max_seq_length = 2048
 
-    train_dataset = prepare_dataset("ponoma16/implicit_pii_detection", "text", "annotated").select(range(100)) 
+    train_dataset = prepare_dataset("ponoma16/implicit_pii_detection", "text", "annotated") 
 
     bnb_config = BitsAndBytesConfig(
             load_in_4bit=True,
@@ -34,7 +40,7 @@ def main(args):
         "mistralai/Mistral-7B-Instruct-v0.3",
         quantization_config=bnb_config,
         use_cache=False,
-        device_map="auto",
+        device_map={"": "cuda:0"},
     )
     model.config.pretraining_tp = 1
 
@@ -43,9 +49,9 @@ def main(args):
     tokenizer.padding_side = "right"
 
     peft_config = LoraConfig(
-            lora_alpha=128,
+            lora_alpha=64,
             lora_dropout=0,
-            r=64,
+            r=32,
             bias="none",
             task_type="CAUSAL_LM",
             target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
@@ -58,17 +64,15 @@ def main(args):
     trainer = SFTTrainer(
         model = model,
         train_dataset = train_dataset,
-        
-        
         processing_class = tokenizer,
         
         args = SFTConfig(
-            per_device_train_batch_size = 4,
+            per_device_train_batch_size = 16,
             gradient_accumulation_steps = 2,
             dataset_text_field = "instructions",
             max_seq_length = max_seq_length,
             warmup_steps = 10,
-            num_train_epochs=2,
+            #num_train_epochs=1,
             output_dir="./",
             logging_dir=f"./logs",
             #max_steps = 60,
@@ -83,6 +87,9 @@ def main(args):
             seed = 3407,
     ),
     )
+    for batch in trainer.get_train_dataloader():
+        print("Batch size:", batch["input_ids"].shape)
+        break
     trainer_stats = trainer.train()
     train_loss = trainer_stats.training_loss
     print(f"Training loss:{train_loss}")
@@ -91,14 +98,17 @@ def main(args):
     trainer.model.save_pretrained(peft_model_id)
     tokenizer.save_pretrained(peft_model_id)
 
-    with open(f"./results.pkl", "wb") as handle:
-        run_result = [
-            1,
-            64,
-            0.1,
-            train_loss,
-        ]
-        pickle.dump(run_result, handle)
+    print("Pushing to hub...")
+    trainer.model.push_to_hub("ponoma16/pii_detection")
+    tokenizer.push_to_hub("ponoma16/pii_detection")
+    # with open(f"./results.pkl", "wb") as handle:
+    #     run_result = [
+    #         1,
+    #         64,
+    #         0.1,
+    #         train_loss,
+    #     ]
+    #     pickle.dump(run_result, handle)
     print("Experiment over")
 
 
