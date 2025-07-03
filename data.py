@@ -3,19 +3,16 @@ import datasets
 import pandas as pd
 import json
 
-TRAINING_PROMPT = """Here is the text that contains private information.
-{input}
+TRAINING_PROMPT = """
 
+### Instruction
 Your task is to find all private information in the text and rewrite it, enclosing each individual private detail in <PRIVATE> and </PRIVATE> tags.
 Tag each atomic private fact separately — even if multiple facts appear in the same sentence.
 
-Example:
-Input:
-Quintin, a 40-year-old logistician from Converse, TX, balances curiosity with practicality, appreciating both new ideas and established methods, and maintains a unique blend of organization and flexibility in all aspects of life.
-Output:
-<PRIVATE>Quintin</PRIVATE>, <PRIVATE>a 40-year-old</PRIVATE> <PRIVATE>logistician</PRIVATE> from <PRIVATE>Converse, TX</PRIVATE>, balances curiosity with practicality, appreciating both new ideas and established methods, and maintains a unique blend of organization and flexibility in all aspects of life.   
+### Input
+{input}
 
-Result:
+### Output
 {output}
 """
 
@@ -33,7 +30,20 @@ def prepare_instructions(inputs, outputs):
 
     return instructions
 
-def prepare_dataset(dataset_repo, input_field, output_field):
+
+def insert_tags(example):
+    text = example["source_text"]
+    masks = sorted(example["privacy_mask"], key=lambda x: x["start"], reverse=True)  # reverse to not break offsets
+    for mask in masks:
+        start, end = mask["start"], mask["end"]
+        label = mask["label"]
+        tagged = f"<PRIVATE>{text[start:end]}</PRIVATE>"
+        text = text[:start] + tagged + text[end:]
+    example["source_text_tagged"] = text
+    return example
+
+
+def prepare_dataset_implicit(dataset_repo, input_field, output_field):
     dataset = load_dataset(dataset_repo)
     train_dataset = dataset["train"]
 
@@ -47,3 +57,16 @@ def prepare_dataset(dataset_repo, input_field, output_field):
     )
     return train_prompt_question_dataset 
 
+def prepare_dataset_explicit(dataset_repo, split, input_field):
+    dataset = load_dataset(dataset_repo)[split].select(range(1000))
+    dataset = dataset.map(insert_tags)
+
+    inputs = dataset[input_field]
+    outputs = dataset["source_text_tagged"]
+    
+    train_prompt_question = prepare_instructions(inputs, outputs)
+
+    train_prompt_question_dataset = datasets.Dataset.from_pandas(
+        pd.DataFrame(data={"instructions": train_prompt_question})
+    )
+    return train_prompt_question_dataset 

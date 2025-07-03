@@ -81,8 +81,7 @@ async def annotate_record(session, sem, persona, professional_persona, person_di
 
 async def process_dataset(dataset_name="your_dataset_name", subset=None, split="train", max_records=5000):
     dataset = load_dataset(dataset_name, subset, split=split)
-    dataset = dataset.select(range(min(max_records, len(dataset))))  
-    dataset = dataset.select(range(3226, max_records))
+    dataset = dataset.select(range(5000, 5200))
     sem = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
     async with ClientSession() as session:
         tasks = []
@@ -120,7 +119,7 @@ async def process_dataset(dataset_name="your_dataset_name", subset=None, split="
             })
 
     final = pd.DataFrame(final)
-    final.to_csv("annotated_dataset1.csv", index=False)
+    final.to_csv("annotated_dataset_val.csv", index=False)
 
     return final
 
